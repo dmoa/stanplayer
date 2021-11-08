@@ -1,3 +1,6 @@
+-- reminder to self for splitting command:
+-- python -m spleeter separate -p spleeter:2stems -o bjork/bachelorette bachelorette.mp3
+
 la = love.audio
 ld = love.data
 le = love.event
@@ -35,17 +38,31 @@ for i = 1, 4 do
     stems_SD[i] = lsound.newSoundData(file_path..tostring(i)..".wav")
 
     local n_samples = stems[i]:getDuration("samples")
-    local temp_sd = lsound.newSoundData(n_samples, stems_SD[i]:getSampleRate(), stems_SD[i]:getBitDepth(), stems_SD[i]:getChannelCount())
+    local original_sd = lsound.newSoundData(n_samples, stems_SD[i]:getSampleRate(), stems_SD[i]:getBitDepth(), 1)
+    local reverse_sd = lsound.newSoundData(n_samples, stems_SD[i]:getSampleRate(), stems_SD[i]:getBitDepth(), 1)
+
     for j = 0, n_samples - 1 do
-        temp_sd:setSample(j, 1, stems_SD[i]:getSample(n_samples - 1 - j, 1))
-        temp_sd:setSample(j, 2, stems_SD[i]:getSample(n_samples - 1 - j, 2))
+
+        -- if stems_SD[i]:getChannelCount() == 2 then
+        original_sd:setSample(j, 1, (stems_SD[i]:getSample(j, 1) + stems_SD[i]:getSample(j, 2)) / 2)
+        reverse_sd:setSample(j, 1, stems_SD[i]:getSample(n_samples - 1 - j, 1) + stems_SD[i]:getSample(n_samples - 1 - j, 1) / 2)
+
+        -- end
+
+
+        -- for k = 1, stems_SD[i]:getChannelCount() do
+        --     reverse_sd:setSample(j, k, stems_SD[i]:getSample(n_samples - 1 - j, k))
+        -- end
     end
-    reverse_stems[i] = la.newSource(temp_sd)
+
+    original_stems[i] = la.newSource(original_sd)
+    reverse_stems[i] = la.newSource(reverse_sd)
 
 end
 
 for i = 1, 4 do
     stems[i]:play()
+    stems[i]:setLooping(true)
 end
 
 joystick = lj.getJoysticks()[1]
@@ -54,7 +71,7 @@ font = lg.newFont(80)
 timer_text = lg.newText(font,"")
 
 -- for later
--- stems[1]:setFilter({type="highpass",volume=1,lowgain=.001})
+-- stems[1]:setFilter({type="lowpass",volume=1,highgain=.001})
 
 
 function love.draw()
@@ -85,6 +102,13 @@ function love.update(dt)
     local button_ls = joystick:isGamepadDown("leftshoulder")
     local button_back = joystick:isGamepadDown("back")
 
+    local joystick_x = joystick:getAxis(1)
+    local joystick_y = joystick:getAxis(2)
+    if math.abs(joystick_x) < 0.5 then joystick_x = 0 end
+    if math.abs(joystick_y) < 0.5 then joystick_y = 0 end
+
+    -- VOLUME
+
     if button_1_down or button_2_down or button_3_down or button_4_down then
         stems[1]:setVolume(tovolume(button_1_down))
         stems[2]:setVolume(tovolume(button_2_down))
@@ -96,6 +120,8 @@ function love.update(dt)
         stems[3]:setVolume(1)
         stems[4]:setVolume(1)
     end
+
+    -- REVERSE
 
     if button_rs then
         if stems ~= reverse_stems then
@@ -115,12 +141,31 @@ function love.update(dt)
                 stems[i]:play()
             end
         end
-
     end
 
-    local length = stems[1]:tell()
+    -- FILTER EFFECTS
+
+    for i = 1, 4 do
+        if joystick_y < 0 then
+            stems[i]:setFilter({type="bandpass",volume=1,lowgain = 1, highgain = 0.01 / math.abs(joystick_y)})
+        elseif joystick_y > 0 then
+            stems[i]:setFilter({type="bandpass",volume=1,lowgain = 0.01 / math.abs(joystick_y), highgain = 1})
+        else
+            stems[i]:setFilter()
+        end
+    end
+
+    -- POSITION EFFECTS
+
+    for i = 1, 4 do
+        stems[i]:setPosition(joystick_x, 0, 0)
+    end
+
+    -- TIMER
+
+    local length = stems[4]:tell()
     if stems == reverse_stems then
-        length = stems[1]:getDuration() - length
+        length = stems[4]:getDuration() - length
     end
 
     timer_text:set(string.format("%.2f", tostring(length)))
@@ -129,4 +174,20 @@ end
 
 function love.keypressed(key)
     if key == "escape" then le.quit() end
+end
+
+function love.gamepadpressed(joystick, button)
+
+    -- FORWARD + BACK
+
+    if button == "dpleft" then
+        for i = 1, 4 do
+            stems[i]:seek(math.max(0, stems[i]:tell() - 10))
+        end
+    end
+    if button == "dpright" then
+        for i = 1, 4 do
+            stems[i]:seek((stems[i]:tell() + 10))
+        end
+    end
 end
